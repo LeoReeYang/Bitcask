@@ -1,4 +1,3 @@
-#include <iostream>
 #include "crc32.h"
 #include <cstring>
 enum InfoType

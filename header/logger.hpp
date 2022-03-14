@@ -3,8 +3,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdio.h>
 #include <filesystem>
+#include <mutex>
+#include <iostream>
+
+std::mutex mutex_RW;
 
 std::string DataPath = "/home/yu/Codes/1/Data";
 
@@ -21,24 +24,25 @@ size_t getFileNums()
 }
 
 std::string suffix = ".log";
-std::string data_prefix = "Data/";
+std::string prefix = "Data/";
 
 std::string filename(size_t log_id)
 {
-    std::string fn(data_prefix + std::to_string(log_id) + suffix);
+    std::string fn(prefix + std::to_string(log_id) + suffix);
     return fn;
 }
 
 class Log
 {
 private:
-    int id, fd;
+    size_t id;
+    ssize_t fd;
     size_t log_size = 0;
 
 public:
-    Log(size_t id)
+    Log(size_t id) : id(id)
     {
-        fd = open(filename(id).c_str(), O_APPEND | O_SYNC | O_CREAT | O_RDWR);
+        fd = open(filename(id).c_str(), O_APPEND | O_SYNC | O_CREAT | O_RDWR, S_IRWXU);
         if (fd < 0)
         {
             std::cout << strerror(errno) << std::endl;
@@ -50,6 +54,7 @@ public:
     bool read(ValueIndex &target, char *str);
     size_t size() { return log_size; }
     size_t get_id() { return id; }
+    size_t get_fd() { return fd; }
 };
 
 size_t Log::write(Record &record, size_t record_size)
@@ -59,24 +64,30 @@ size_t Log::write(Record &record, size_t record_size)
 
     if (fd < 0)
     {
-        printf("%s", strerror(errno));
+        std::cout << strerror(errno) << std::endl;
+        exit(-1);
     }
 
     ssize_t offset = lseek(fd, 0, SEEK_CUR);
-    if (lseek(fd, 0, SEEK_CUR) < 0)
+
+    if (offset < 0)
     {
         std::cout << strerror(errno) << std::endl;
+        exit(-1);
     }
 
-    ssize_t write_nums = ::write(fd, (void *)temp, record_size);
-    if (write_nums == record_size)
+    std::lock_guard<std::mutex> lock(mutex_RW);
     {
-        fsync(fd);
-        log_size += record_size;
-    }
-    else
-    {
-        printf("%s\n", strerror(errno));
+        ssize_t write_nums = ::write(fd, (void *)temp, record_size);
+        if (write_nums == record_size)
+        {
+            fsync(fd);
+            log_size += record_size;
+        }
+        else
+        {
+            std::cout << strerror(errno) << std::endl;
+        }
     }
 
     delete[] temp;
@@ -86,12 +97,17 @@ size_t Log::write(Record &record, size_t record_size)
 
 bool Log::read(ValueIndex &target, char *str)
 {
-    id = open(filename(target.file_id).c_str(), O_APPEND | O_CREAT | O_DIRECT | O_SYNC | O_RDWR);
+    size_t lseek_offset = lseek(fd, target.offset, SEEK_SET);
 
-    if (lseek(id, target.offset, SEEK_SET) == target.offset)
+    if (lseek_offset == target.offset)
     {
-        ::pread(id, str, target.len, target.offset);
+        ::pread(fd, str, target.len, target.offset);
         return true;
+    }
+    else
+    {
+        std::cout << "lseek error" << std::endl;
+        std::cout << strerror(errno) << std::endl;
     }
     return false;
 }

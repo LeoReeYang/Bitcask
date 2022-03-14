@@ -1,63 +1,67 @@
-#include <iostream>
-#include <unistd.h>
+#include "bitcask.hpp"
+#include <thread>
+#include <chrono>
+#include <vector>
+#include <pthread.h>
 
-// using namespace std;
+using namespace std;
 
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <filesystem>
-namespace fs = std::filesystem;
-
-int main(int argc, char **argv)
+void invoc1(Bitcask &test)
 {
-    // int aflag = 0;
-    // int bflag = 0;
-    // char *cvalue = NULL;
-    // int index;
-    // int c;
-
-    // opterr = 0;
-
-    // while ((c = getopt(argc, argv, "abc:")) != -1)
-    //     switch (c)
-    //     {
-    //     case 'a':
-    //         aflag = 1;
-    //         break;
-    //     case 'b':
-    //         bflag = 1;
-    //         break;
-    //     case 'c':
-    //         cvalue = optarg;
-    //         break;
-    //     case '?':              // other characters
-    //         if (optopt == 'c') // target character without argument needed
-    //             fprintf(stderr, "Option -%c requires an argument.\n", optopt);
-    //         else if (isprint(optopt)) // other characters
-    //             fprintf(stderr, "Unknown option `-%c'.\n", optopt);
-    //         else
-    //             fprintf(stderr,
-    //                     "Unknown option character `\\x%x'.\n",
-    //                     optopt);
-    //         return 1;
-    //     default:
-    //         abort();
-    //     }
-
-    // printf("aflag = %d, bflag = %d, cvalue = %s\n",
-    //        aflag, bflag, cvalue);
-
-    // for (index = optind; index < argc; index++)
-    //     printf("Non-option argument %s\n", argv[index]);
-
-    std::string path = "/home/yu/Codes/1";
-
-    for (const auto &entry : fs::directory_iterator(path))
+    for (int i = 0; i < 5; i++)
     {
-        std::cout << entry.path() << std ::endl;
+        string key = std::to_string(i);                        //, value1 = "Cy is the fxxking God!";
+        test.set(move(key), string("Cy is the fxxking God!")); // key + to_string(rand())
     }
+}
+
+void invoc2(Bitcask &test)
+{
+    for (int i = 5; i > 0; i--)
+    {
+        string key = std::to_string(i); //, value1 = "Cy the fxxking God!";
+        test.set(move(key), string("Cy is the fxxking God.."));
+    }
+}
+
+// extern Status status = Status(OK, string("success."));
+
+int main()
+{
+    Bitcask test;
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    string value;
+    // test.set("1", "cy is god");
+    // test.set("2", "cy is god");
+    // test.get("1", &value);
+    // cout << value << endl;
+
+    // test.remove("1");
+    // cout << test.get("2") << endl;
+
+    std::vector<std::thread> threads;
+    threads.emplace_back(invoc1, std::ref(test));
+    threads.emplace_back(invoc2, std::ref(test));
+    threads.emplace_back(invoc1, std::ref(test));
+    threads.emplace_back(invoc2, std::ref(test));
+
+    for (auto &thread : threads)
+        thread.join();
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::milli> fp_ms = t2 - t1;
+
+    std::cout << "time cost: " << fp_ms.count() << " ms" << endl;
+
+    test.print_kv();
+
+    std::cout << "====================================" << endl
+              << "recovery data from log:" << endl;
+
+    Bitcask test_recovery;
+    test_recovery.print_kv();
 
     return 0;
 }
