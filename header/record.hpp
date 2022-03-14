@@ -64,6 +64,6 @@ struct Record : public InfoHeader
         memcpy(temp, (void *)(InfoHeader *)this, kInfoHeadSize);
         memcpy(temp + kInfoHeadSize, (void *)key.c_str(), key_size);
         memcpy(temp + kInfoHeadSize + key_size, (void *)value.c_str(), value_size);
-        memcpy(temp + kInfoHeadSize + key_size + value_size, (void *)value_type, kValueTypeSize);
+        memcpy(temp + kInfoHeadSize + key_size + value_size, (void *)&value_type, kValueTypeSize);
     }
 };
