@@ -12,13 +12,13 @@ const uint64_t kValueLenSize = sizeof(uint64_t);
 const uint64_t kKeyLenSize = sizeof(uint64_t);
 const uint64_t kRecordSize = sizeof(uint64_t);
 const uint64_t kValueTypeSize = sizeof(InfoType);
-const size_t kLogSize = 60;
+const size_t kLogSize = 1 << 17;
 
 struct ValueIndex
 {
-    uint64_t file_id;
+    std::string filename;
     uint64_t offset, len;
-    ValueIndex(uint64_t file_id, uint64_t offset, uint64_t len) : file_id(file_id), offset(offset), len(len) {}
+    ValueIndex(std::string filename, uint64_t offset, uint64_t len) : filename(filename), offset(offset), len(len) {}
     ValueIndex() {}
     ~ValueIndex() {}
 };

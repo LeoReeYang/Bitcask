@@ -4,8 +4,6 @@
 #include <vector>
 #include <cstring>
 
-std::mutex logger_mutex;
-
 using namespace std;
 
 class Bitcask : BasicOperation
@@ -13,11 +11,13 @@ class Bitcask : BasicOperation
 private:
     static uint64_t tstamp_;
     map<string, ValueIndex> index_;
+    size_t file_count = 0;
     Log *logger;
-    map<size_t, Log *> logs;
+    map<string, Log *> logs;
+    mutable std::shared_mutex logger_mutex;
 
     void recovery();
-    void if_logs_insert(Log *);
+    void if_logs_insert(Log **);
 
 public:
     void index_add(const string &key, const ValueIndex &index)
@@ -37,7 +37,7 @@ public:
 
     void update_index(const string &key, size_t value_offset, size_t len)
     {
-        ValueIndex index(logger->get_id(), value_offset, len);
+        ValueIndex index(logger->get_fn(), value_offset, len);
         index_[std::move(key)] = index;
     }
 
@@ -64,11 +64,12 @@ Status Bitcask::set(const string &key, const string &value)
 
     Record record(get_tstamp(), key_size, value_size, key, value, kNewValue);
 
-    std::lock_guard<std::mutex> lock(logger_mutex); //同一个文件拿到logger锁的人才能操作logger去写入
+    //同一个文件拿到logger锁的人才能操作logger去写入
+    std::unique_lock lock(logger_mutex);
     {
         size_t value_offset = logger->write(record, record_size);
         update_index(key, value_offset, record.value_size);
-        if_logs_insert(logger);
+        if_logs_insert(&logger);
     }
 
     return Status(OK, std::string(strerror(errno)));
@@ -78,10 +79,15 @@ Status Bitcask::get(const string &key, string *value)
 {
     if (index_.find(key) != index_.end())
     {
-        ValueIndex index = index_[key];
+        ValueIndex index;
+        std::shared_lock lock(logger_mutex);
+        {
+            index = index_[key];
+        }
+
         char *temp_value = new char[index.len];
 
-        auto entry = logs.find(index.file_id);
+        auto entry = logs.find(index.filename);
 
         if ((entry->second)->read(index, temp_value))
         {
@@ -108,10 +114,12 @@ Status Bitcask::remove(const string &key)
 
     Record record(get_tstamp(), key_size, 0, key, "", kRemoveValue);
 
-    logger->write(record, record_size);
-    index_erase(key);
-
-    if_logs_insert(logger);
+    std::unique_lock lock(logger_mutex);
+    {
+        logger->write(record, record_size);
+        index_erase(key);
+        if_logs_insert(&logger);
+    }
 
     return Status(OK, std::string(strerror(errno)));
 }
@@ -120,23 +128,32 @@ void Bitcask::recovery()
 {
     size_t file_nums = get_file_nums();
 
+    file_count = file_nums;
+
     char *head_buffer = new char[kInfoHeadSize];
 
-    for (size_t file = 0; file < file_nums; file++)
+    for (const auto &entry : fs::directory_iterator(DataPath))
     {
         ssize_t fd;
-        logger = new Log(file);
+        std::string filename = string(entry.path().c_str());
 
-        if (logger->get_id() == file)
+        filename = filename.substr(filename.size() - 5); // get the file prefix to open
+
+        logger = new Log(filename); // new a logger to handle the file
+
+        if (logger->get_fn() == filename)
         {
             fd = logger->get_fd();
             if (fd != -1)
-                logs.insert(std::pair<size_t, Log *>(file, logger));
+            {
+                string file_id = filename.substr(0, filename.size() - 3);
+                logs.insert(std::pair<string, Log *>(filename, logger));
+            }
             else
                 std::cout << "open file failed when get file descriptor." << std::endl;
         }
         else
-            std::cout << "recovery logger open failed when open file :" << file << std::endl;
+            std::cout << "recovery logger open failed when open file :" << std::endl;
 
         size_t file_size = lseek(fd, 0, SEEK_END);
         size_t offset = lseek(fd, 0, SEEK_SET);
@@ -153,7 +170,7 @@ void Bitcask::recovery()
 
             if (read(fd, (void *)key, head->key_size) != head->key_size)
             {
-                std::cout << "logger id: " << file
+                std::cout << "logger id: " << filename
                           << " read for key failed." << strerror(errno) << std::endl;
             }
 
@@ -162,7 +179,7 @@ void Bitcask::recovery()
                 std::string key_value(key, head->key_size);
                 size_t value_offset = lseek(fd, 0, SEEK_CUR);
 
-                ValueIndex index(file, value_offset, head->value_size);
+                ValueIndex index(filename, value_offset, head->value_size);
                 index_add(key_value, index); // update key with the index in the Memory
 
                 lseek(fd, head->value_size + kValueTypeSize, SEEK_CUR); // ignore the value and valueType section
@@ -177,11 +194,11 @@ void Bitcask::recovery()
     }
 
     if (file_nums != 0)
-        if_logs_insert(logger);
+        if_logs_insert(&logger);
     else
     {
-        logger = new Log(0);
-        logs.insert(std::pair<size_t, Log *>(0, logger));
+        logger = new Log("0.log");
+        logs.insert(std::pair<string, Log *>("0.log", logger));
     }
 
     delete[] head_buffer;
@@ -206,14 +223,16 @@ void Bitcask::print_kv()
     }
 }
 
-void Bitcask::if_logs_insert(Log *logger)
+void Bitcask::if_logs_insert(Log **logger) //   (Log *)*logger
 {
-    if (logger->size() > kLogSize)
+    if ((*logger)->size() > kLogSize)
     {
-        size_t new_id = logger->get_id() + 1;
+        size_t new_id = file_count;
 
-        logger = new Log(new_id);
-        logs.insert(std::pair<size_t, Log *>(new_id, logger));
+        std::string new_file(std::to_string(new_id) + std::string(".log"));
+
+        *logger = new Log(new_file.c_str());
+        logs.insert(std::pair<string, Log *>(new_file, *logger));
 
         std::cout << "new logger for file: " << new_id << std::endl;
     }

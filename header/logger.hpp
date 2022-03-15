@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <filesystem>
 #include <mutex>
+#include <shared_mutex>
 #include <iostream>
 #include <thread>
 
@@ -12,7 +13,7 @@ namespace fs = std::filesystem;
 
 std::mutex mutex_RW;
 
-const std::string DataPath = "/home/yu/Codes/Bitcask/Data";
+const std::string DataPath = "/home/yu/Codes/Bitcask/Data/";
 std::string suffix = ".log";
 std::string prefix = "Data/";
 
@@ -35,14 +36,17 @@ std::string filename(size_t log_id)
 class Log
 {
 private:
-    size_t id;
     ssize_t fd;
     size_t log_size = 0;
+    std::string file = "";
 
 public:
-    Log(size_t id) : id(id)
+    Log(const std::string &filename) : file(filename)
     {
-        fd = open(filename(id).c_str(), O_APPEND | O_SYNC | O_CREAT | O_RDWR, S_IRWXU);
+        std::string temp = std::string(DataPath + filename);
+        fd = open(temp.c_str(), O_APPEND | O_SYNC | O_CREAT | O_RDWR, S_IRWXU);
+
+        log_size = lseek(fd, 0, SEEK_END);
         if (fd < 0)
             std::cout << strerror(errno) << std::endl;
     }
@@ -52,8 +56,8 @@ public:
     bool read(ValueIndex &target, char *str);
 
     size_t size() { return log_size; }
-    size_t get_id() { return id; }
     size_t get_fd() { return fd; }
+    std::string get_fn() { return file; }
 };
 
 size_t Log::write(Record &record, size_t record_size)
@@ -64,7 +68,7 @@ size_t Log::write(Record &record, size_t record_size)
 
     if (fd < 0)
     {
-        std::cout << "logger open file failed at id : " << id << std::endl
+        std::cout << "logger open file failed at id : " << file << std::endl
                   << strerror(errno) << std::endl;
         exit(-1);
     }
@@ -72,7 +76,7 @@ size_t Log::write(Record &record, size_t record_size)
     size_t offset = lseek(fd, 0, SEEK_CUR);
     if (offset < 0)
     {
-        std::cout << "logger lseek failed at id : " << id << std::endl
+        std::cout << "logger lseek failed at id : " << file << std::endl
                   << strerror(errno) << std::endl;
         exit(-1);
     }
@@ -90,11 +94,11 @@ size_t Log::write(Record &record, size_t record_size)
         std::thread::id this_id = std::this_thread::get_id();
 
         std::cout << "Thread id: " << this_id << "  Successfully write: "
-                  << '"' << record.value << '"' << "  file id :" << id << std::endl;
+                  << '"' << record.value << '"' << "  file id :" << file << std::endl;
     }
     else
     {
-        std::cout << "logger write failed at id : " << id << std::endl
+        std::cout << "logger write failed at id : " << file << std::endl
                   << strerror(errno) << std::endl;
         exit(-1);
     }
