@@ -10,14 +10,14 @@ class Bitcask : BasicOperation
 {
 private:
     static uint64_t tstamp_;
-    static uint64_t file_count;
     map<string, ValueIndex> index_;
-
-public:
     Log *logger;
-
     map<size_t, Log *> logs;
 
+    void recovery();
+    void if_logs_insert(Log *);
+
+public:
     void index_add(const string &key, const ValueIndex &index)
     {
         index_[std::move(key)] = index;
@@ -39,40 +39,21 @@ public:
         index_[std::move(key)] = index;
     }
 
-    void if_logs_insert(Log *);
-
-    void recovery(size_t file_nums);
-
 public:
     Status get(const string &key, string *str_get);
     Status set(const string &key, const string &value);
     Status remove(const string &key);
-    void list_keys();
 
+    void list_keys();
     void print_kv();
     Bitcask()
     {
-        size_t file_nums = getFileNums();
-        recovery(file_nums);
-
-        if (file_nums == 0)
-        {
-            size_t id = 0;
-            logger = new Log(id);
-            logs.insert(std::pair<size_t, Log *>(id, logger));
-        }
-        else
-        {
-            size_t id = file_nums - 1;
-            logger = new Log(id);
-            logs.insert(std::pair<size_t, Log *>(id, logger));
-        }
+        recovery();
     }
     ~Bitcask() {}
 };
 
 uint64_t Bitcask::tstamp_ = 0;
-uint64_t Bitcask::file_count = 0;
 
 Status Bitcask::set(const string &key, const string &value)
 {
@@ -131,58 +112,74 @@ Status Bitcask::remove(const string &key)
     return Status(OK, std::string(strerror(errno)));
 }
 
-void Bitcask::recovery(size_t file_nums)
+void Bitcask::recovery()
 {
+    size_t file_nums = get_file_nums();
+
     char *head_buffer = new char[kInfoHeadSize];
 
     for (size_t file = 0; file < file_nums; file++)
     {
-
-        // int fd = open(filename(file).c_str(), O_RDONLY, S_IRWXU);
-        // if (fd < 0)
-        // {
-        //     std::cout << strerror(errno) << std::endl;
-        // }
-
+        ssize_t fd;
         logger = new Log(file);
-        logs.insert(std::pair<size_t, Log *>(file, logger));
 
-        ssize_t fd = logger->get_fd();
+        if (logger->get_id() == file)
+        {
+            fd = logger->get_fd();
+            if (fd != -1)
+                logs.insert(std::pair<size_t, Log *>(file, logger));
+            else
+                std::cout << "open file failed when get file descriptor." << std::endl;
+        }
+        else
+            std::cout << "recovery logger open failed when open file :" << file << std::endl;
 
-        size_t end_offset = lseek(fd, 0, SEEK_END);
+        size_t file_size = lseek(fd, 0, SEEK_END);
         size_t offset = lseek(fd, 0, SEEK_SET);
 
-        while (lseek(fd, 0, SEEK_CUR) != end_offset)
+        while (lseek(fd, 0, SEEK_CUR) != file_size) // file_size + 1 ?
         {
-            read(fd, (void *)head_buffer, kInfoHeadSize);
+            if (read(fd, (void *)head_buffer, kInfoHeadSize) != kInfoHeadSize)
+            {
+                std::cout << "read head_buffer failed" << strerror(errno) << std::endl;
+            }
 
             InfoHeader *head = (InfoHeader *)head_buffer;
             char *key = new char[head->key_size];
 
+            if (read(fd, (void *)key, head->key_size) != head->key_size)
+            {
+                std::cout << "logger id: " << file
+                          << " read for key failed." << strerror(errno) << std::endl;
+            }
+
             if (head->value_size)
             {
-                if (read(fd, (void *)key, head->key_size) == head->key_size)
-                {
-                    std::string key_value(key, head->key_size);
-                    size_t value_offset = lseek(fd, 0, SEEK_CUR);
+                std::string key_value(key, head->key_size);
+                size_t value_offset = lseek(fd, 0, SEEK_CUR);
 
-                    ValueIndex index(file, value_offset, head->value_size);
-                    index_add(key_value, index); // update key with the index in the Memory
+                ValueIndex index(file, value_offset, head->value_size);
+                index_add(key_value, index); // update key with the index in the Memory
 
-                    lseek(fd, head->value_size + kValueTypeSize, SEEK_CUR); // ignore the value and valueType section
-                }
+                lseek(fd, head->value_size + kValueTypeSize, SEEK_CUR); // ignore the value and valueType section
             }
             else
             {
-                if (read(fd, (void *)key, head->key_size) == head->key_size)
-                {
-                    index_erase(std::string(key, head->key_size));
-                    lseek(fd, kValueTypeSize, SEEK_CUR);
-                }
+                index_erase(std::string(key, head->key_size));
+                lseek(fd, kValueTypeSize, SEEK_CUR);
             }
             delete[] key;
         }
     }
+
+    if (file_nums != 0)
+        if_logs_insert(logger);
+    else
+    {
+        logger = new Log(0);
+        logs.insert(std::pair<size_t, Log *>(0, logger));
+    }
+
     delete[] head_buffer;
 }
 
@@ -213,5 +210,7 @@ void Bitcask::if_logs_insert(Log *logger)
 
         logger = new Log(new_id);
         logs.insert(std::pair<size_t, Log *>(new_id, logger));
+
+        std::cout << "new logger for file: " << new_id << std::endl;
     }
 }
