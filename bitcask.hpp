@@ -4,6 +4,8 @@
 #include <vector>
 #include <cstring>
 
+std::mutex logger_mutex;
+
 using namespace std;
 
 class Bitcask : BasicOperation
@@ -62,10 +64,12 @@ Status Bitcask::set(const string &key, const string &value)
 
     Record record(get_tstamp(), key_size, value_size, key, value, kNewValue);
 
-    size_t value_offset = logger->write(record, record_size);
-    update_index(key, value_offset, record.value_size);
-
-    if_logs_insert(logger);
+    std::lock_guard<std::mutex> lock(logger_mutex); //同一个文件拿到logger锁的人才能操作logger去写入
+    {
+        size_t value_offset = logger->write(record, record_size);
+        update_index(key, value_offset, record.value_size);
+        if_logs_insert(logger);
+    }
 
     return Status(OK, std::string(strerror(errno)));
 }

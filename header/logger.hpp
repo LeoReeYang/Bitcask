@@ -77,7 +77,7 @@ size_t Log::write(Record &record, size_t record_size)
         exit(-1);
     }
 
-    std::lock_guard<std::mutex> lock(mutex_RW);
+    // std::lock_guard<std::mutex> lock(mutex_RW);
     {
         write_nums = ::write(fd, (void *)temp, record_size);
     }
@@ -89,8 +89,8 @@ size_t Log::write(Record &record, size_t record_size)
 
         std::thread::id this_id = std::this_thread::get_id();
 
-        std::cout << "Thread id: " << this_id << "  Successfully write: " << record.value
-                  << "  file id :" << id << std::endl;
+        std::cout << "Thread id: " << this_id << "  Successfully write: "
+                  << '"' << record.value << '"' << "  file id :" << id << std::endl;
     }
     else
     {

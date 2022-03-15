@@ -12,7 +12,7 @@ const uint64_t kValueLenSize = sizeof(uint64_t);
 const uint64_t kKeyLenSize = sizeof(uint64_t);
 const uint64_t kRecordSize = sizeof(uint64_t);
 const uint64_t kValueTypeSize = sizeof(InfoType);
-const size_t kLogSize = 100;
+const size_t kLogSize = 60;
 
 struct ValueIndex
 {
