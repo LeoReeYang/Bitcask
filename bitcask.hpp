@@ -296,88 +296,64 @@ void Bitcask::internel_compact(map<std::string, Log *> logs, map<std::string, Va
 {
     std::cout << "compact:======================================>" << std::endl;
 
-    Log *target;
-    vector<Record> records;
-    std::string test_ = cur_log_name.substr(0, cur_log_name.size() - 4);
-    // cur_log_name = string(cur_log_name.substr(0, cur_log_name.size() - 4)); // get the id prefix
-    size_t working_log_id = stoi(test_); // convert it into int
+    map<std::string, Log *> new_logs;
+    map<std::string, ValueIndex> new_index;
+
+    std::string working_prefix = cur_log_name.substr(0, cur_log_name.size() - 4);
+
+    size_t working_log_id = stoi(working_prefix); // convert it into int
+
+    size_t new_log_start = 10;
+    std::string new_file = std::to_string(new_log_start) + std::string(".log");
+    Log *target = new Log(new_file);
+    new_logs.insert(std::pair<std::string, Log *>(new_file, target));
 
     for (auto elem : index) // traverse all index to store the KV
     {
         std::string log_id = elem.second.filename;
         size_t cur_log_id = stoi(log_id.substr(0, log_id.size() - 4));
 
-        if (cur_log_id < working_log_id) // handle the old log
+        if (cur_log_id < working_log_id) // handle the old logs
         {
-            std::cout << "cur_log_id !" << std::endl;
             auto work_logger = logs[elem.second.filename];
 
             char *temp_value = new char[elem.second.len];
             work_logger->read(elem.second, temp_value);
-            // std::cout << "read value:" << std::string(temp_value) << std::endl
-            //           << "read value length: " << elem.second.len << std::endl
-            //           << "read key:" << elem.first << std::endl;
+
             std::string test_value = std::string(temp_value, elem.second.len);
             std::cout << "value: " << test_value << std::endl;
 
-            Record test(Bitcask::get_tstamp(), elem.first.size(), elem.second.len, elem.first, test_value, kNewValue);
+            Record temp_record(Bitcask::get_tstamp(), elem.first.size(), elem.second.len, elem.first, test_value, kNewValue);
 
-            std::cout << "value: " << test.value << std::endl;
+            size_t record_size = kInfoHeadSize + elem.first.size() + elem.second.len + kValueTypeSize;
+            size_t value_offset = target->write(temp_record, record_size);
 
-            records.push_back(test);
+            ValueIndex index_t(target->get_fn(), value_offset, elem.second.len);
+            new_index[elem.first] = std::move(index_t);
 
+            if (target->size() > kLogSize)
+            {
+                size_t new_id = new_log_start + 1;
+
+                std::string new_file(std::to_string(new_id) + std::string(".log"));
+
+                target = new Log(new_file);
+                new_logs.insert(std::pair<std::string, Log *>(new_file, target));
+
+                std::cout << "new logger for file: " << new_id << std::endl;
+            }
             delete[] temp_value;
         }
     }
-
-    for (const auto &temp : records)
-    {
-        std::cout << "key :" << temp.key << std::endl
-                  << "value: " << temp.value << std::endl
-                  << "=====================================" << std::endl;
-    }
-
-    size_t t_file_count = 10;
-
-    map<std::string, Log *> new_logs;
-    map<std::string, ValueIndex> new_index;
-
-    std::string new_file = std::to_string(t_file_count) + std::string(".log");
-    target = new Log(new_file);
-
-    new_logs.insert(std::pair<std::string, Log *>(new_file, target));
-
-    for (auto &record : records) // starting to write the KV known
-    {
-        size_t record_size = kInfoHeadSize + record.key_size + record.value_size + kValueTypeSize;
-        size_t value_offset = target->write(record, record_size);
-
-        // update_index(record.key, value_offset, record.value_size);
-
-        ValueIndex index_t(target->get_fn(), value_offset, record.value_size);
-        new_index[record.key] = std::move(index_t);
-
-        if (target->size() > kLogSize) // if switch to new logger
-        {
-            size_t new_id = t_file_count + 1;
-
-            std::string new_file(std::to_string(new_id) + std::string(".log"));
-
-            target = new Log(new_file);
-            new_logs.insert(std::pair<std::string, Log *>(new_file, target));
-
-            std::cout << "new logger for file: " << new_id << std::endl;
-        }
-    }
-
-    logs.merge(new_logs);
-    index_.merge(new_index);
 
     for (auto &log : logs) // delete all the old files
     {
         ssize_t fd = log.second->get_fd();
         delete log.second;
 
-        unlink(log.first.c_str());
+        unlink((DataPath + log.first).c_str());
     }
+
+    logs.merge(new_logs);
+    index_.merge(new_index);
 }
