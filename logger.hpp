@@ -13,9 +13,9 @@ namespace fs = std::filesystem;
 
 std::mutex mutex_RW;
 
-const std::string DataPath = "/home/yu/Codes/Bitcask/Data/";
+const std::string DataPath = "data/";
 std::string suffix = ".log";
-std::string prefix = "Data/";
+std::string prefix = "data/";
 
 size_t get_file_nums()
 {
