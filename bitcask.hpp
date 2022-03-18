@@ -3,6 +3,7 @@
 #include "header/basicoperation.h"
 #include <vector>
 #include <cstring>
+#include <stdio.h>
 
 using namespace std;
 
@@ -166,10 +167,7 @@ Status Bitcask::remove(const std::string &key)
 
 void Bitcask::recovery()
 {
-    size_t file_nums = get_file_nums();
-
-    file_count = file_nums;
-
+    file_count = get_file_nums();
     char *head_buffer = new char[kInfoHeadSize];
 
     for (const auto &entry : fs::directory_iterator(DataPath))
@@ -177,18 +175,15 @@ void Bitcask::recovery()
         ssize_t fd;
         std::string filename = std::string(entry.path().c_str());
 
-        filename = filename.substr(filename.size() - 5); // get the file prefix to open
+        filename = filename.substr(DataPath.size(), filename.size() - DataPath.size()); // get the file prefix to open
 
         logger = new Log(filename); // new a logger to handle the file
 
-        if (logger->get_fn() == filename)
+        if (logger->get_fn() == filename) //"xxx.log"
         {
             fd = logger->get_fd();
             if (fd != -1)
-            {
-                std::string file_id = filename.substr(0, filename.size() - 3);
                 logs.insert(std::pair<std::string, Log *>(filename, logger));
-            }
             else
                 std::cout << "open file failed when get file descriptor." << std::endl;
         }
@@ -201,9 +196,7 @@ void Bitcask::recovery()
         while (lseek(fd, 0, SEEK_CUR) != file_size) // file_size + 1 ?
         {
             if (read(fd, (void *)head_buffer, kInfoHeadSize) != kInfoHeadSize)
-            {
                 std::cout << "read head_buffer failed" << strerror(errno) << std::endl;
-            }
 
             InfoHeader *head = (InfoHeader *)head_buffer;
             char *key = new char[head->key_size];
@@ -226,8 +219,7 @@ void Bitcask::recovery()
                     uncompacted += index_[key].len + kInfoHeadSize + kValueTypeSize + head->key_size + head->value_size;
                 }
 
-                index_add(key_value, index); // update key with the index in the Memory
-
+                index_add(key_value, index);                            // update key with the index in the Memory
                 lseek(fd, head->value_size + kValueTypeSize, SEEK_CUR); // ignore the value and valueType section
             }
             else
@@ -241,12 +233,16 @@ void Bitcask::recovery()
     }
 
     std::cout << "recovery umcompacted: " << uncompacted << std::endl;
+
     if (uncompacted >= kCompactThreshold)
     {
-        compact();
+        // compact();
+        std::thread compact_thread(&Bitcask::internel_compact, this, logs, index_, logger->get_fn());
+        // compact_thread.detach();
+        compact_thread.join();
     }
 
-    if (file_nums != 0)
+    if (file_count != 0)
         if_switch_logger();
     else
     {
@@ -300,41 +296,39 @@ void Bitcask::internel_compact(map<std::string, Log *> logs, map<std::string, Va
     map<std::string, ValueIndex> new_index;
 
     std::string working_prefix = cur_log_name.substr(0, cur_log_name.size() - 4);
+    size_t working_log_id = stoi(working_prefix); // 拿到正在写的log的数组前缀
 
-    size_t working_log_id = stoi(working_prefix); // convert it into int
-
-    size_t new_log_start = 10;
-    std::string new_file = std::to_string(new_log_start) + std::string(".log");
+    size_t new_log_start = file_count + 100;                       // new log file prefix
+    std::string new_file = std::to_string(new_log_start) + suffix; // make the "xxx.log" string
     Log *target = new Log(new_file);
     new_logs.insert(std::pair<std::string, Log *>(new_file, target));
 
-    for (auto elem : index) // traverse all index to store the KV
-    {
+    for (auto elem : index) // 遍历索引表
+    {                       // key->file,offset,len
         std::string log_id = elem.second.filename;
-        size_t cur_log_id = stoi(log_id.substr(0, log_id.size() - 4));
+        size_t cur_log_id = stoi(log_id.substr(0, log_id.size() - 4)); //拿到遍历项目的前缀
 
-        if (cur_log_id < working_log_id) // handle the old logs
+        if (cur_log_id < working_log_id)
         {
             auto work_logger = logs[elem.second.filename];
-
             char *temp_value = new char[elem.second.len];
+
             work_logger->read(elem.second, temp_value);
 
-            std::string test_value = std::string(temp_value, elem.second.len);
-            std::cout << "value: " << test_value << std::endl;
+            std::string test_value = std::string(temp_value, elem.second.len); // get value
 
+            // build record
             Record temp_record(Bitcask::get_tstamp(), elem.first.size(), elem.second.len, elem.first, test_value, kNewValue);
-
             size_t record_size = kInfoHeadSize + elem.first.size() + elem.second.len + kValueTypeSize;
             size_t value_offset = target->write(temp_record, record_size);
 
-            ValueIndex index_t(target->get_fn(), value_offset, elem.second.len);
-            new_index[elem.first] = std::move(index_t);
+            // write into new_index
+            new_index[elem.first] = std::move(ValueIndex(target->get_fn(), value_offset, elem.second.len));
 
-            if (target->size() > kLogSize)
+            if (target->size() > kLogSize) // when to switch to new log file
             {
                 size_t new_id = new_log_start + 1;
-
+                new_log_start++;
                 std::string new_file(std::to_string(new_id) + std::string(".log"));
 
                 target = new Log(new_file);
@@ -348,12 +342,20 @@ void Bitcask::internel_compact(map<std::string, Log *> logs, map<std::string, Va
 
     for (auto &log : logs) // delete all the old files
     {
-        ssize_t fd = log.second->get_fd();
-        delete log.second;
-
-        unlink((DataPath + log.first).c_str());
+        // std::cout << DataPath + log.first << std::endl;
+        ::remove((DataPath + log.first).c_str());
     }
 
-    logs.merge(new_logs);
-    index_.merge(new_index);
+    Bitcask::logs.merge(new_logs); // 利用merge不会合并相同key的原理先合并不同的
+    //
+    for (auto &entry : new_logs)
+    {
+        Bitcask::logs[entry.first] = new Log(entry.first);
+    }
+    Bitcask::index_.merge(new_index); // key and ValueIndex
+    for (auto &entry : new_index)
+    {
+        // ValueIndex a = new ValueIndex(entry.second.filename, entry.second.offset, entry.second.len);
+        Bitcask::index_[entry.first] = entry.second;
+    }
 }

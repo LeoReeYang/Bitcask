@@ -36,24 +36,27 @@ int main()
     Bitcask test;
     auto t1 = std::chrono::high_resolution_clock::now();
 
-    test.set("1", text1);
-    test.set("1", text1);
-    test.set("1", text1);
-    test.set("1", text1);
-    test.set("1", text1);
-    test.set("1", text1);
-    test.set("1", text1);
-    test.set("1", text1);
-    test.set("1", text1);
+    // test.set("1", text1);
+    // test.set("1", text1);
+    // test.set("1", text1);
+    // test.set("1", text1);
+    // test.set("2", text1);
+    // test.set("1", text1);
+    // test.set("1", text1);
+    // test.set("1", text1);
+    // test.set("1", text1);
 
-    // std::vector<std::thread> threads;
+    std::vector<std::thread> threads;
+    threads.emplace_back(invoc1, std::ref(test));
+    threads.emplace_back(invoc2, std::ref(test));
     // threads.emplace_back(invoc1, std::ref(test));
     // threads.emplace_back(invoc2, std::ref(test));
-    // threads.emplace_back(invoc1, std::ref(test));
-    // threads.emplace_back(invoc2, std::ref(test));
 
-    // for (auto &thread : threads)
-    //     thread.join();
+    for (auto &thread : threads)
+        thread.join();
+    string value;
+    test.get("2", &value);
+    cout << value << endl;
 
     auto t2 = std::chrono::high_resolution_clock::now();
 
