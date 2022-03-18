@@ -317,7 +317,7 @@ void Bitcask::internel_compact(map<std::string, Log *> logs, map<std::string, Va
             // std::cout << "read value:" << std::string(temp_value) << std::endl
             //           << "read value length: " << elem.second.len << std::endl
             //           << "read key:" << elem.first << std::endl;
-            std::string test_value = std::string(temp_value);
+            std::string test_value = std::string(temp_value, elem.second.len);
             std::cout << "value: " << test_value << std::endl;
 
             Record test(Bitcask::get_tstamp(), elem.first.size(), elem.second.len, elem.first, test_value, kNewValue);

@@ -93,8 +93,8 @@ size_t Log::write(Record &record, size_t record_size)
 
         std::thread::id this_id = std::this_thread::get_id();
 
-        std::cout << "Thread id: " << this_id << "  Successfully write: "
-                  << '"' << record.value << '"' << "  file id :" << file << std::endl;
+        // std::cout << "Thread id: " << this_id << "  Successfully write: "
+        //           << '"' << record.value << '"' << "  file id :" << file << std::endl;
     }
     else
     {
