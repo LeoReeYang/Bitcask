@@ -280,7 +280,8 @@ void Bitcask::if_switch_logger() //   (Log *)*logger
 {
     if (logger->size() > kLogSize)
     {
-        size_t new_id = file_count;
+        size_t new_id = file_count + 1;
+        file_count++;
 
         std::string new_file(std::to_string(new_id) + std::string(".log"));
 
@@ -297,37 +298,51 @@ void Bitcask::internel_compact(map<std::string, Log *> logs, map<std::string, Va
 
     Log *target;
     vector<Record> records;
-    cur_log_name = string(cur_log_name.substr(0, cur_log_name.size() - 4)); // get the id prefix
-    size_t working_log_id = stoi(cur_log_name);                             // convert it into int
+    std::string test_ = cur_log_name.substr(0, cur_log_name.size() - 4);
+    // cur_log_name = string(cur_log_name.substr(0, cur_log_name.size() - 4)); // get the id prefix
+    size_t working_log_id = stoi(test_); // convert it into int
 
-    for (auto &elem : index) // traverse all index to store the KV
+    for (auto elem : index) // traverse all index to store the KV
     {
-
         std::string log_id = elem.second.filename;
-        size_t cur_log_id = stoi(std::string(log_id.substr(0, log_id.size() - 4)));
+        size_t cur_log_id = stoi(log_id.substr(0, log_id.size() - 4));
 
         if (cur_log_id < working_log_id) // handle the old log
         {
+            std::cout << "cur_log_id !" << std::endl;
             auto work_logger = logs[elem.second.filename];
-
-            if (work_logger->get_fd() < 0)
-            {
-                std::cout << strerror(errno) << std::endl;
-                exit(-1);
-            }
 
             char *temp_value = new char[elem.second.len];
             work_logger->read(elem.second, temp_value);
-            records.emplace_back(Record(Bitcask::get_tstamp(), elem.first.size(), elem.second.len, elem.first, std::string(temp_value), kNewValue));
+            // std::cout << "read value:" << std::string(temp_value) << std::endl
+            //           << "read value length: " << elem.second.len << std::endl
+            //           << "read key:" << elem.first << std::endl;
+            std::string test_value = std::string(temp_value);
+            std::cout << "value: " << test_value << std::endl;
+
+            Record test(Bitcask::get_tstamp(), elem.first.size(), elem.second.len, elem.first, test_value, kNewValue);
+
+            std::cout << "value: " << test.value << std::endl;
+
+            records.push_back(test);
+
+            delete[] temp_value;
         }
     }
 
-    file_count = 0;
+    for (const auto &temp : records)
+    {
+        std::cout << "key :" << temp.key << std::endl
+                  << "value: " << temp.value << std::endl
+                  << "=====================================" << std::endl;
+    }
+
+    size_t t_file_count = 10;
 
     map<std::string, Log *> new_logs;
     map<std::string, ValueIndex> new_index;
 
-    std::string new_file = std::to_string(file_count) + std::string(".log");
+    std::string new_file = std::to_string(t_file_count) + std::string(".log");
     target = new Log(new_file);
 
     new_logs.insert(std::pair<std::string, Log *>(new_file, target));
@@ -344,7 +359,7 @@ void Bitcask::internel_compact(map<std::string, Log *> logs, map<std::string, Va
 
         if (target->size() > kLogSize) // if switch to new logger
         {
-            size_t new_id = file_count + 1;
+            size_t new_id = t_file_count + 1;
 
             std::string new_file(std::to_string(new_id) + std::string(".log"));
 
@@ -361,6 +376,8 @@ void Bitcask::internel_compact(map<std::string, Log *> logs, map<std::string, Va
     for (auto &log : logs) // delete all the old files
     {
         ssize_t fd = log.second->get_fd();
+        delete log.second;
+
         unlink(log.first.c_str());
     }
 }
